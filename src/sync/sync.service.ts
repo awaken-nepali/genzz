@@ -43,18 +43,17 @@ export class SyncService {
             try {
                 const id = this.generateId(item);
                 const ref = firestore.collection('posts').doc(id);
-                await ref.set(
-                    {
-                        title: item.title,
-                        content: item.content,
-                        images: item.images || [],
-                        url: item.url || undefined,
-                        priority: item.priority ?? 0,
-                        isPosted: false,
-                        updatedAt: new Date(),
-                    },
-                    { merge: true },
-                );
+                const payload: Record<string, any> = {
+                    images: item.images || [],
+                    priority: item.priority ?? 0,
+                    isPosted: false,
+                    updatedAt: new Date(),
+                };
+                if (item.title !== undefined) payload.title = item.title;
+                if (item.content !== undefined) payload.content = item.content;
+                if (item.url !== undefined) payload.url = item.url;
+                if (item.videoUrl !== undefined) payload.videoUrl = item.videoUrl;
+                await ref.set(payload, { merge: true });
                 if (debug) {
                     const saved = await ref.get();
                     const data = saved.data();
@@ -137,6 +136,7 @@ export class SyncService {
         content?: string;
         url?: string;
         images?: string[];
+        videoUrl?: string;
         priority?: number;
     }> {
         return rows
@@ -149,16 +149,19 @@ export class SyncService {
                     .split(',')
                     .map((s: string) => s.trim())
                     .filter(Boolean),
+                videoUrl:
+                    r.videoUrl || r.videoURL || r.VideoUrl || r.VideoURL || r.video || undefined,
                 priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 0,
             }))
-            .filter((r) => r.title || r.content || r.url);
+            .filter((r) => r.title || r.content || r.url || (r.images || []).length || r.videoUrl);
     }
 
     private dedupeByUrlOrTitle(items: any[]) {
         const seen = new Set<string>();
         const out: any[] = [];
         for (const it of items) {
-            const key = (it.url || it.title || '').toLowerCase();
+            const primaryImage = (it.images && it.images[0]) || '';
+            const key = (it.url || it.videoUrl || primaryImage || it.title || '').toLowerCase();
             if (!key || seen.has(key)) continue;
             seen.add(key);
             out.push(it);

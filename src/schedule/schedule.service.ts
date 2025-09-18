@@ -15,7 +15,7 @@ export class ScheduleService {
     private readonly facebookService: FacebookService,
   ) { }
 
-  @Cron(CronExpression.EVERY_10_SECONDS)
+  @Cron(CronExpression.EVERY_5_MINUTES)
   async handleCron() {
     console.log('Running a task every minute');
 
@@ -39,8 +39,13 @@ export class ScheduleService {
 
       if (!candidates.length) {
         console.log(
-          'All candidate posts already marked as posted; nothing to post',
+          'All candidate posts already marked as posted; resetting isPosted to restart cycle',
         );
+        try {
+          await this.resetIsPostedAtMidnight();
+        } catch (e) {
+          console.error('Failed to reset isPosted when pool exhausted', e);
+        }
         return;
       }
 
@@ -67,10 +72,39 @@ export class ScheduleService {
             updatedFields.title = article.title;
           if (article?.excerpt && !postData.content)
             updatedFields.content = article.excerpt;
+
+          // Try to extract a lead image: prefer Open Graph/Twitter meta; fallback to first <img> in article content
+          const doc = dom.window.document as Document;
+          const ogImage =
+            doc.querySelector('meta[property="og:image"]')?.getAttribute('content') ||
+            doc.querySelector('meta[name="twitter:image"]')?.getAttribute('content') ||
+            doc.querySelector('link[rel="image_src"]')?.getAttribute('href') ||
+            undefined;
+
+          let leadImage: string | undefined = ogImage || undefined;
+          if (!leadImage && article?.content) {
+            try {
+              const contentDoc = new JSDOM(article.content).window.document;
+              leadImage = contentDoc.querySelector('img')?.getAttribute('src') || undefined;
+            } catch (_) {
+              // ignore content parsing errors
+            }
+          }
+
+          if (leadImage) {
+            const currentImages: string[] = Array.isArray(postData.images)
+              ? postData.images.filter(Boolean)
+              : [];
+            if (!currentImages.includes(leadImage)) {
+              updatedFields.images = [...currentImages, leadImage];
+            }
+          }
           if (Object.keys(updatedFields).length) {
             await selectedDoc.ref.update(updatedFields);
             postData.title = updatedFields.title ?? postData.title;
             postData.content = updatedFields.content ?? postData.content;
+            if (updatedFields.images)
+              postData.images = updatedFields.images;
             console.log('Updated document with URL metadata:', updatedFields);
           }
         } catch (e) {
@@ -82,17 +116,47 @@ export class ScheduleService {
       }
 
       // Build content and images
-      const messageContent =
-        `${postData.title || ''}\n\n${postData.content || ''}`.trim();
       const imagesArray: string[] = Array.isArray(postData.images)
         ? postData.images.filter(Boolean)
         : [];
+      let messageContent = `${postData.title || ''}\n\n${postData.content || ''} \n\n ${postData.url || ''}`.trim();
+      if (!postData.title && !postData.content && !postData.url && imagesArray.length) {
+        messageContent = '#GenZProtestSeptember8 #PunishTheCulprit #KPOli #RameshLekhak #CPNUML #NepalCongress';
+      }
+
+      // If videoUrl is present, post video to Facebook from public/videos
+      if (postData.videoUrl) {
+        try {
+          const baseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT ?? 3000}`;
+          const normalized = `${postData.videoUrl}`.replace(/^\/+/, '');
+          const pathWithPrefix = normalized.startsWith('videos/') ? normalized : `videos/${normalized}`;
+          const fileUrl = `${baseUrl}/${pathWithPrefix}`;
+
+          await this.facebookService.postToFacebookVideo({
+            videoUrl: fileUrl,
+            description: messageContent,
+          });
+          console.log('Successfully posted video to Facebook');
+        } catch (e) {
+          console.error('Failed to post video on Facebook', e);
+        }
+
+        // After video post, mark as posted and end this cycle
+        try {
+          await selectedDoc.ref.update({ isPosted: true, postedAt: new Date() });
+          console.log(`Marked document ${selectedDoc.id} as posted (video)`);
+        } catch (e) {
+          console.error('Failed to update post document as posted', e);
+        }
+        return;
+      }
       const imageCsv = imagesArray.join(',');
       // Post to Twitter (supports images)
       try {
         await this.twitterService.postToTwitter({
           content: messageContent,
           image: imageCsv,
+          url: postData.url,
         });
         console.log('Successfully posted to Twitter');
       } catch (e) {

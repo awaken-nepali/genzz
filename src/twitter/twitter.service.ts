@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { TwitterApi } from 'twitter-api-v2';
-import { truncate } from 'lodash';
+import sharp from 'sharp';
 
 @Injectable()
 export class TwitterService {
@@ -33,7 +33,7 @@ export class TwitterService {
     in_reply_to_status_id?: string,
   ) {
     try {
-      const { content: tweetText, image: mediaUrl, comment } = post;
+      const { content: tweetText, image: mediaUrl, comment, url } = post;
       const texts = tweetText.split('\n');
       const hashtags = texts.pop();
       const maxTweetLength = 280;
@@ -55,11 +55,20 @@ export class TwitterService {
       if (images.length) {
         for (const img of images) {
           try {
-            const response = await axios.get(img, {
+            const response = await axios.get<ArrayBuffer>(img, {
               responseType: 'arraybuffer',
             });
 
-            const mediaBuffer = Buffer.from(response.data, 'binary');
+            let mediaBuffer: Buffer = Buffer.from(new Uint8Array(response.data));
+            // If no URL was provided for this post, treat images as coming from Firestore and grayscale them
+            if (!url) {
+              try {
+                mediaBuffer = await sharp(mediaBuffer).grayscale().jpeg().toBuffer();
+              } catch (procErr) {
+                // keep original buffer on processing failure
+                console.warn('sharp processing failed, using original image buffer', procErr);
+              }
+            }
 
             const mediaId = await this.twitterClient.v1.uploadMedia(
               mediaBuffer,
@@ -74,8 +83,9 @@ export class TwitterService {
         }
       }
 
+      const truncated = text.length > 280 ? `${text.slice(0, 277)}...` : text;
       const response = await this.twitterClient.v2.tweet(
-        truncate(text, { length: 280 }),
+        truncated,
         {
           media: mediaIds.length
             ? {

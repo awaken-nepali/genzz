@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import * as fs from 'fs';
+import * as path from 'path';
+import FormData from 'form-data';
 
 @Injectable()
 export class FacebookService {
@@ -8,6 +11,8 @@ export class FacebookService {
   private readonly accessToken: string;
   private readonly graphApiUrl = 'https://graph.facebook.com/v18.0';
   private readonly logger = new Logger(FacebookService.name);
+  private readonly defaultHashtags =
+    '#GenZProtestSeptember8 #PunishTheCulprit #KPOli #RameshLekhak #CPNUML #NepalCongress';
 
   constructor(private configService: ConfigService) {
     this.pageId = this.configService.get<string>('FACEBOOK_PAGE_ID');
@@ -16,10 +21,11 @@ export class FacebookService {
 
   async post(message: string) {
     const url = `${this.graphApiUrl}/${this.pageId}/feed`;
+    const finalMessage = `${message || ''}\n\n${this.defaultHashtags}`.trim();
 
     try {
       const response = await axios.post(url, {
-        message,
+        message: finalMessage,
         access_token: this.accessToken,
       });
       console.log('Post created on Facebook:', response.data);
@@ -38,10 +44,11 @@ export class FacebookService {
       const url = `https://graph.facebook.com/v19.0/${this.configService.getOrThrow(
         'FACEBOOK_PAGE_ID',
       )}/feed`;
+      const finalMessage = `${message || ''}\n\n${this.defaultHashtags}`.trim();
 
       const { data } = await axios.post(url, null, {
         params: {
-          message: 'from tjhe api',
+          message: finalMessage,
           access_token: this.configService.getOrThrow(
             'FACEBOOK_USER_ACCESS_TOKEN',
           ),
@@ -67,6 +74,7 @@ export class FacebookService {
     content: string;
   }): Promise<any> {
     try {
+      const finalMessage = `${content || ''}\n\n${this.defaultHashtags}`.trim();
       let photoUploadResponse, photoId;
       const photoIds: string[] = [];
       if (image) {
@@ -100,7 +108,7 @@ export class FacebookService {
       )}/feed`;
       const postResponse = await axios.post(postUrl, null, {
         params: {
-          message: content,
+          message: finalMessage,
           attached_media:
             image && photoIds.length
               ? JSON.stringify(photoIds.map((id) => ({ media_fbid: id })))
@@ -142,6 +150,47 @@ export class FacebookService {
       console.error('Error posting comment:', data.error);
     } else {
       console.log('Successfully posted comment:', data);
+    }
+  }
+
+  async postToFacebookVideo({
+    videoUrl,
+    description,
+  }: {
+    videoUrl: string;
+    description?: string;
+  }): Promise<any> {
+    try {
+      const url = `https://graph.facebook.com/v19.0/${this.configService.getOrThrow(
+        'FACEBOOK_PAGE_ID',
+      )}/videos`;
+      const finalDescription = `${description || ''}\n\n${this.defaultHashtags}`.trim();
+
+      const form = new FormData();
+      form.append('description', finalDescription);
+      form.append('access_token', this.configService.getOrThrow('FACEBOOK_USER_ACCESS_TOKEN'));
+
+      if (videoUrl.startsWith('http://') || videoUrl.startsWith('https://')) {
+        form.append('file_url', videoUrl);
+      } else {
+        const absolute = path.isAbsolute(videoUrl)
+          ? videoUrl
+          : path.join(process.cwd(), 'public', 'videos', videoUrl.replace(/^\/+/, ''));
+        form.append('source', fs.createReadStream(absolute));
+      }
+
+      const { data } = await axios.post(url, form, {
+        headers: form.getHeaders(),
+      });
+
+      this.logger.log(`Posted video to Facebook: ${JSON.stringify(data)}`);
+      return data;
+    } catch (error) {
+      this.logger.error(
+        'Failed to post video to Facebook',
+        error?.response?.data || error.message,
+      );
+      throw error;
     }
   }
 }
