@@ -36,7 +36,7 @@ export class FacebookService {
   async postToFacebook(message: string): Promise<any> {
     try {
       const url = `https://graph.facebook.com/v19.0/${this.configService.getOrThrow(
-        'APP_FACEBOOK_PAGE_ID',
+        'FACEBOOK_PAGE_ID',
       )}/feed`;
 
       const { data } = await axios.post(url, null, {
@@ -75,7 +75,7 @@ export class FacebookService {
 
           for (const img of images) {
             const photoUploadUrl = `https://graph.facebook.com/v19.0/${this.configService.getOrThrow(
-              'APP_FACEBOOK_PAGE_ID',
+              'FACEBOOK_PAGE_ID',
             )}/photos`;
 
             const photoUploadResponse = await axios.post(photoUploadUrl, null, {
@@ -96,7 +96,7 @@ export class FacebookService {
       }
       // Step 2: Create post with attached photo
       const postUrl = `https://graph.facebook.com/v19.0/${this.configService.getOrThrow(
-        'APP_FACEBOOK_PAGE_ID',
+        'FACEBOOK_PAGE_ID',
       )}/feed`;
       const postResponse = await axios.post(postUrl, null, {
         params: {

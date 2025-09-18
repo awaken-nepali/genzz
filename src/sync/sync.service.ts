@@ -21,8 +21,9 @@ export class SyncService {
         const firestore = this.firebase.getFirestore();
         const debug = (this.config.get<string>('SYNC_DEBUG') || '').toLowerCase() === 'true';
 
-        const rowsFromSheets = await this.fetchFromGoogleSheets();
+        const rowsFromSheets = [];//await this.fetchFromGoogleSheets();
         const rowsFromGithub = await this.fetchFromGithubCsvs();
+        console.log('rowsFromGithub', rowsFromGithub);
         const allRows = [...rowsFromSheets, ...rowsFromGithub];
 
         const normalized = this.normalizeRows(allRows);
@@ -104,11 +105,12 @@ export class SyncService {
 
     private async fetchFromGithubCsvs(): Promise<any[]> {
         try {
-            const urls = (this.config.get<string>('SYNC_GITHUB_CSV_URLS') || 'https://raw.githubusercontent.com/awaken-nepali/genz/refs/heads/main/samples/posts.sample.csv')
+            const urls = (this.config.get<string>('SYNC_GITHUB_CSV_URLS') || 'https://raw.githubusercontent.com/awaken-nepali/genzz/refs/heads/main/samples/posts.sample.csv')
                 .split(',')
                 .map((u) => u.trim())
                 .filter(Boolean);
             const items: any[] = [];
+            console.log('urls', urls);
             for (const url of urls) {
                 try {
                     const { data } = await axios.get(url, { responseType: 'text' });
@@ -117,6 +119,7 @@ export class SyncService {
                         skip_empty_lines: true,
                         trim: true,
                     });
+                    console.log('records', records);
                     items.push(...records);
                 } catch (e) {
                     this.logger.warn(`CSV fetch failed for ${url}: ${e?.message || e}`);
