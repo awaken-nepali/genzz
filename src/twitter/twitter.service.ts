@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { TwitterApi } from 'twitter-api-v2';
-import sharp from 'sharp';
 
 @Injectable()
 export class TwitterService {
@@ -59,16 +58,7 @@ export class TwitterService {
               responseType: 'arraybuffer',
             });
 
-            let mediaBuffer: Buffer = Buffer.from(new Uint8Array(response.data));
-            // If no URL was provided for this post, treat images as coming from Firestore and grayscale them
-            if (!url) {
-              try {
-                mediaBuffer = await sharp(mediaBuffer).grayscale().jpeg().toBuffer();
-              } catch (procErr) {
-                // keep original buffer on processing failure
-                console.warn('sharp processing failed, using original image buffer', procErr);
-              }
-            }
+            const mediaBuffer: Buffer = Buffer.from(new Uint8Array(response.data));
 
             const mediaId = await this.twitterClient.v1.uploadMedia(
               mediaBuffer,

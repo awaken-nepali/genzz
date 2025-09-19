@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
-import FormData from 'form-data';
+import * as FormData from 'form-data';
 
 @Injectable()
 export class FacebookService {
@@ -86,16 +86,36 @@ export class FacebookService {
               'FACEBOOK_PAGE_ID',
             )}/photos`;
 
-            const photoUploadResponse = await axios.post(photoUploadUrl, null, {
-              params: {
-                url: img,
-                published: false,
-                access_token: this.configService.getOrThrow(
-                  'FACEBOOK_USER_ACCESS_TOKEN',
-                ),
-              },
-            });
+            // Check if it's a localhost URL or no hostname - read from public directory
+            const isLocalhost = img.includes('localhost') || img.includes('127.0.0.1') || !img.includes('://');
+            let photoUploadResponse;
 
+            if (isLocalhost) {
+              // Extract path from URL and read from public directory
+              const url = new URL(img.startsWith('http') ? img : `http://localhost:3000${img}`);
+              const publicPath = path.join(process.cwd(), 'public', url.pathname.replace(/^\//, ''));
+
+              const form = new FormData();
+              form.append('source', fs.createReadStream(publicPath));
+              form.append('published', 'false');
+              form.append('access_token', this.configService.getOrThrow('FACEBOOK_USER_ACCESS_TOKEN'));
+
+              photoUploadResponse = await axios.post(photoUploadUrl, form, {
+                headers: form.getHeaders(),
+              });
+            } else {
+              // Use URL for external images
+              photoUploadResponse = await axios.post(photoUploadUrl, null, {
+                params: {
+                  url: img,
+                  published: false,
+                  access_token: this.configService.getOrThrow(
+                    'FACEBOOK_USER_ACCESS_TOKEN',
+                  ),
+                },
+              });
+            }
+            console.log('photoUploadResponse', photoUploadResponse);
             photoIds.push(photoUploadResponse.data.id);
           }
         } catch (e) {

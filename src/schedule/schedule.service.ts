@@ -15,7 +15,7 @@ export class ScheduleService {
     private readonly facebookService: FacebookService,
   ) { }
 
-  @Cron(CronExpression.EVERY_5_MINUTES)
+  @Cron(CronExpression.EVERY_10_SECONDS)
   async handleCron() {
     console.log('Running a task every minute');
 
@@ -153,11 +153,11 @@ export class ScheduleService {
       const imageCsv = imagesArray.join(',');
       // Post to Twitter (supports images)
       try {
-        await this.twitterService.postToTwitter({
-          content: messageContent,
-          image: imageCsv,
-          url: postData.url,
-        });
+        // await this.twitterService.postToTwitter({
+        //   content: messageContent,
+        //   image: imageCsv,
+        //   url: postData.url,
+        // });
         console.log('Successfully posted to Twitter');
       } catch (e) {
         console.error('Failed to post on Twitter', e);

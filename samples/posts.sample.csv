@@ -1,2 +1,3 @@
-title,content,url,images,priority,source
+title,content,url,images,priority,source,videoUrl
+,,,,,,http://localhost:3000/videos/rabi-cooperative-case.mp4
 ,,,http://localhost:3000/images/man-with-flag.png,,
