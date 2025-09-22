@@ -4,6 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import { parse } from 'csv-parse/sync';
 import { google } from 'googleapis';
 import axios from 'axios';
+import * as fs from 'fs';
+import * as path from 'path';
 import { FirebaseService } from '../firebase/firebase.service';
 
 @Injectable()
@@ -19,14 +21,16 @@ export class SyncService {
     async nightlySync() {
         this.logger.log('Starting nightly sync from sources');
         const firestore = this.firebase.getFirestore();
-        const debug = (this.config.get<string>('SYNC_DEBUG') || '').toLowerCase() === 'true';
+        const debug =
+            (this.config.get<string>('SYNC_DEBUG') || '').toLowerCase() === 'true';
 
-        const rowsFromSheets = [];//await this.fetchFromGoogleSheets();
+        const rowsFromSheets = []; //await this.fetchFromGoogleSheets();
         const rowsFromGithub = await this.fetchFromGithubCsvs();
         console.log('rowsFromGithub', rowsFromGithub);
         const allRows = [...rowsFromSheets, ...rowsFromGithub];
 
         const normalized = this.normalizeRows(allRows);
+        console.log('Normalized rows:', normalized);
         if (debug) {
             this.logger.log(`Normalized ${normalized.length} rows`);
             const withImages = normalized.filter((r) => (r.images || []).length);
@@ -74,9 +78,12 @@ export class SyncService {
     private async fetchFromGoogleSheets(): Promise<any[]> {
         try {
             const spreadsheetId = this.config.get<string>('SYNC_SHEETS_ID');
-            const range = this.config.get<string>('SYNC_SHEETS_RANGE') || 'Approved!A:Z';
+            const range =
+                this.config.get<string>('SYNC_SHEETS_RANGE') || 'Approved!A:Z';
             const clientEmail = this.config.get<string>('FIREBASE_CLIENT_EMAIL');
-            const privateKey = this.config.get<string>('FIREBASE_PRIVATE_KEY')?.replace(/\\n/g, '\n');
+            const privateKey = this.config
+                .get<string>('FIREBASE_PRIVATE_KEY')
+                ?.replace(/\\n/g, '\n');
 
             if (!spreadsheetId || !clientEmail || !privateKey) return [];
 
@@ -87,7 +94,10 @@ export class SyncService {
             });
 
             const sheets = google.sheets({ version: 'v4', auth: jwt });
-            const res = await sheets.spreadsheets.values.get({ spreadsheetId, range });
+            const res = await sheets.spreadsheets.values.get({
+                spreadsheetId,
+                range,
+            });
             const values = res.data.values || [];
             if (values.length < 2) return [];
             const headers = values[0].map((h) => `${h}`.trim().toLowerCase());
@@ -104,24 +114,48 @@ export class SyncService {
 
     private async fetchFromGithubCsvs(): Promise<any[]> {
         try {
-            const urls = (this.config.get<string>('SYNC_GITHUB_CSV_URLS') || 'https://raw.githubusercontent.com/awaken-nepali/genzz/refs/heads/main/samples/posts.sample.csv')
-                .split(',')
-                .map((u) => u.trim())
-                .filter(Boolean);
+            const isDev = this.config.get<string>('NODE_ENV') === 'development' || !this.config.get<string>('NODE_ENV');
             const items: any[] = [];
-            console.log('urls', urls);
-            for (const url of urls) {
+
+            if (isDev) {
+                // In development, read from local samples file
+                const csvPath = path.join(process.cwd(), 'samples', 'posts.sample.csv');
                 try {
-                    const { data } = await axios.get(url, { responseType: 'text' });
+                    const data = fs.readFileSync(csvPath, 'utf8');
                     const records = parse(data, {
                         columns: true,
                         skip_empty_lines: true,
                         trim: true,
                     });
-                    console.log('records', records);
+                    console.log('Local CSV records:', records);
                     items.push(...records);
                 } catch (e) {
-                    this.logger.warn(`CSV fetch failed for ${url}: ${e?.message || e}`);
+                    this.logger.warn(`Local CSV read failed: ${e?.message || e}`);
+                }
+            } else {
+                // In production, fetch from URLs
+                const urls = (
+                    this.config.get<string>('SYNC_GITHUB_CSV_URLS') ||
+                    'https://raw.githubusercontent.com/awaken-nepali/genzz/refs/heads/main/samples/posts.sample.csv'
+                )
+                    .split(',')
+                    .map((u) => u.trim())
+                    .filter(Boolean);
+                console.log('urls', urls);
+                for (const url of urls) {
+                    try {
+                        const { data } = await axios.get(url, { responseType: 'text' });
+                        console.log('data', data);
+                        const records = parse(data, {
+                            columns: true,
+                            skip_empty_lines: true,
+                            trim: true,
+                        });
+                        console.log('records', records);
+                        items.push(...records);
+                    } catch (e) {
+                        this.logger.warn(`CSV fetch failed for ${url}: ${e?.message || e}`);
+                    }
                 }
             }
             return items;
@@ -150,18 +184,48 @@ export class SyncService {
                     .map((s: string) => s.trim())
                     .filter(Boolean),
                 videoUrl:
-                    r.videoUrl || r.videoURL || r.VideoUrl || r.VideoURL || r.video || undefined,
+                    r.videoUrl ||
+                    r.videoURL ||
+                    r.VideoUrl ||
+                    r.VideoURL ||
+                    r.video ||
+                    undefined,
                 priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 0,
             }))
-            .filter((r) => r.title || r.content || r.url || (r.images || []).length || r.videoUrl);
+            .filter(
+                (r) =>
+                    r.title ||
+                    r.content ||
+                    r.url ||
+                    (r.images || []).length ||
+                    r.videoUrl,
+            );
     }
 
     private dedupeByUrlOrTitle(items: any[]) {
         const seen = new Set<string>();
         const out: any[] = [];
         for (const it of items) {
-            const primaryImage = (it.images && it.images[0]) || '';
-            const key = (it.url || it.videoUrl || primaryImage || it.title || '').toLowerCase();
+            // Create a comprehensive key including all images
+            const allImages = (it.images || []).join(',');
+            const key = (
+                allImages ||
+                it.videoUrl ||
+                it.url ||
+                it.title ||
+                ''
+            ).toLowerCase();
+
+            console.log('Deduplication check:', {
+                url: it.url,
+                videoUrl: it.videoUrl,
+                images: it.images,
+                allImages,
+                title: it.title,
+                key,
+                isDuplicate: seen.has(key)
+            });
+
             if (!key || seen.has(key)) continue;
             seen.add(key);
             out.push(it);
@@ -170,7 +234,14 @@ export class SyncService {
     }
 
     private generateId(item: any): string {
-        const base = (item.url || item.title || `${Date.now()}`).toLowerCase();
+        const allImages = (item.images || []).join(',');
+        const base = (
+            allImages ||
+            item.videoUrl ||
+            item.url ||
+            item.title ||
+            `${Date.now()}`
+        ).toLowerCase();
         return base
             .replace(/https?:\/\//g, '')
             .replace(/[^a-z0-9]+/g, '-')
@@ -178,5 +249,3 @@ export class SyncService {
             .slice(0, 200);
     }
 }
-
-

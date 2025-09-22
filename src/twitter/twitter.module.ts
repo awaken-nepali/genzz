@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
 import { TwitterService } from './twitter.service';
+import { UtilsModule } from '../utils/utils.module';
 
 @Module({
-  providers: [TwitterService]
+  imports: [UtilsModule],
+  providers: [TwitterService],
+  exports: [TwitterService],
 })
-export class TwitterModule {}
+export class TwitterModule { }

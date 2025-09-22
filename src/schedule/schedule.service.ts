@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { FirebaseService } from '../firebase/firebase.service';
 import { TwitterService } from '../twitter/twitter.service';
 import { FacebookService } from '../facebook/facebook.service';
+import { TimeCounterService } from '../utils/time-counter.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import axios from 'axios';
 import { JSDOM } from 'jsdom';
@@ -13,9 +14,10 @@ export class ScheduleService {
     private readonly firebaseService: FirebaseService,
     private readonly twitterService: TwitterService,
     private readonly facebookService: FacebookService,
+    private readonly timeCounterService: TimeCounterService,
   ) { }
 
-  @Cron(CronExpression.EVERY_10_SECONDS)
+  @Cron(CronExpression.EVERY_30_MINUTES)
   async handleCron() {
     console.log('Running a task every minute');
 
@@ -76,8 +78,12 @@ export class ScheduleService {
           // Try to extract a lead image: prefer Open Graph/Twitter meta; fallback to first <img> in article content
           const doc = dom.window.document as Document;
           const ogImage =
-            doc.querySelector('meta[property="og:image"]')?.getAttribute('content') ||
-            doc.querySelector('meta[name="twitter:image"]')?.getAttribute('content') ||
+            doc
+              .querySelector('meta[property="og:image"]')
+              ?.getAttribute('content') ||
+            doc
+              .querySelector('meta[name="twitter:image"]')
+              ?.getAttribute('content') ||
             doc.querySelector('link[rel="image_src"]')?.getAttribute('href') ||
             undefined;
 
@@ -85,7 +91,9 @@ export class ScheduleService {
           if (!leadImage && article?.content) {
             try {
               const contentDoc = new JSDOM(article.content).window.document;
-              leadImage = contentDoc.querySelector('img')?.getAttribute('src') || undefined;
+              leadImage =
+                contentDoc.querySelector('img')?.getAttribute('src') ||
+                undefined;
             } catch (_) {
               // ignore content parsing errors
             }
@@ -103,8 +111,7 @@ export class ScheduleService {
             await selectedDoc.ref.update(updatedFields);
             postData.title = updatedFields.title ?? postData.title;
             postData.content = updatedFields.content ?? postData.content;
-            if (updatedFields.images)
-              postData.images = updatedFields.images;
+            if (updatedFields.images) postData.images = updatedFields.images;
             console.log('Updated document with URL metadata:', updatedFields);
           }
         } catch (e) {
@@ -119,17 +126,34 @@ export class ScheduleService {
       const imagesArray: string[] = Array.isArray(postData.images)
         ? postData.images.filter(Boolean)
         : [];
-      let messageContent = `${postData.title || ''}\n\n${postData.content || ''} \n\n ${postData.url || ''}`.trim();
-      if (!postData.title && !postData.content && !postData.url && imagesArray.length) {
-        messageContent = '#GenZProtestSeptember8 #PunishTheCulprit #KPOli #RameshLekhak #CPNUML #NepalCongress';
+
+      // Get time counter message
+      const timeMessage = this.timeCounterService.getDramaticJusticeMessage();
+
+      let messageContent =
+        `${postData.title || ''}\n\n${postData.content || ''} \n\n ${postData.url || ''}`.trim();
+      if (
+        !postData.title &&
+        !postData.content &&
+        !postData.url &&
+        imagesArray.length
+      ) {
+        messageContent = `${timeMessage}\n\n#GenZProtestSeptember8 #PunishTheCulprit #KPOli #RameshLekhak #CPNUML #NepalCongress`;
+      } else {
+        // Add time counter to all posts
+        messageContent = `${messageContent}\n\n${timeMessage}`;
       }
 
       // If videoUrl is present, post video to Facebook from public/videos
       if (postData.videoUrl) {
         try {
-          const baseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT ?? 3000}`;
+          const baseUrl =
+            process.env.PUBLIC_BASE_URL ||
+            `http://localhost:${process.env.PORT ?? 3000}`;
           const normalized = `${postData.videoUrl}`.replace(/^\/+/, '');
-          const pathWithPrefix = normalized.startsWith('videos/') ? normalized : `videos/${normalized}`;
+          const pathWithPrefix = normalized.startsWith('videos/')
+            ? normalized
+            : `videos/${normalized}`;
           const fileUrl = `${baseUrl}/${pathWithPrefix}`;
 
           await this.facebookService.postToFacebookVideo({
@@ -143,7 +167,10 @@ export class ScheduleService {
 
         // After video post, mark as posted and end this cycle
         try {
-          await selectedDoc.ref.update({ isPosted: true, postedAt: new Date() });
+          await selectedDoc.ref.update({
+            isPosted: true,
+            postedAt: new Date(),
+          });
           console.log(`Marked document ${selectedDoc.id} as posted (video)`);
         } catch (e) {
           console.error('Failed to update post document as posted', e);
@@ -231,6 +258,12 @@ export class ScheduleService {
       `${postData?.title || ''}\n\n${postData?.content || ''}`.trim();
     await this.twitterService.post(message);
     await this.facebookService.post(message);
+  }
+
+  // Manual trigger for testing
+  async manualTrigger() {
+    console.log('Manual trigger called');
+    return await this.handleCron();
   }
 
   // Manual HTML parsing helpers removed in favor of Readability

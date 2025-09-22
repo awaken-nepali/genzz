@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { TimeCounterService } from '../utils/time-counter.service';
 import axios from 'axios';
 import { TwitterApi } from 'twitter-api-v2';
 
@@ -7,13 +8,22 @@ import { TwitterApi } from 'twitter-api-v2';
 export class TwitterService {
   private twitterClient: TwitterApi;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private timeCounterService: TimeCounterService,
+  ) {
     this.twitterClient = new TwitterApi({
       appKey: this.configService.get<string>('TWITTER_API_KEY'),
       appSecret: this.configService.get<string>('TWITTER_API_SECRET_KEY'),
       accessToken: this.configService.get<string>('TWITTER_ACCESS_TOKEN'),
-      accessSecret: this.configService.get<string>('TWITTER_ACCESS_TOKEN_SECRET'),
+      accessSecret: this.configService.get<string>(
+        'TWITTER_ACCESS_TOKEN_SECRET',
+      ),
     });
+  }
+
+  private getTimeCounterMessage(): string {
+    return this.timeCounterService.getDramaticJusticeMessage();
   }
 
   async post(tweet: string) {
@@ -26,11 +36,7 @@ export class TwitterService {
     }
   }
 
-
-  async postToTwitter(
-    post: any,
-    in_reply_to_status_id?: string,
-  ) {
+  async postToTwitter(post: any, in_reply_to_status_id?: string) {
     try {
       const { content: tweetText, image: mediaUrl, comment, url } = post;
       const texts = tweetText.split('\n');
@@ -58,7 +64,9 @@ export class TwitterService {
               responseType: 'arraybuffer',
             });
 
-            const mediaBuffer: Buffer = Buffer.from(new Uint8Array(response.data));
+            const mediaBuffer: Buffer = Buffer.from(
+              new Uint8Array(response.data),
+            );
 
             const mediaId = await this.twitterClient.v1.uploadMedia(
               mediaBuffer,
@@ -74,23 +82,20 @@ export class TwitterService {
       }
 
       const truncated = text.length > 280 ? `${text.slice(0, 277)}...` : text;
-      const response = await this.twitterClient.v2.tweet(
-        truncated,
-        {
-          media: mediaIds.length
-            ? {
-              media_ids: mediaIds.slice(0, 4) as
-                | [string]
-                | [string, string]
-                | [string, string, string]
-                | [string, string, string, string],
-            }
-            : undefined,
-          reply: in_reply_to_status_id && {
-            in_reply_to_tweet_id: in_reply_to_status_id,
-          },
+      const response = await this.twitterClient.v2.tweet(truncated, {
+        media: mediaIds.length
+          ? {
+            media_ids: mediaIds.slice(0, 4) as
+              | [string]
+              | [string, string]
+              | [string, string, string]
+              | [string, string, string, string],
+          }
+          : undefined,
+        reply: in_reply_to_status_id && {
+          in_reply_to_tweet_id: in_reply_to_status_id,
         },
-      );
+      });
       if (!in_reply_to_status_id) {
         await this.postToTwitter({ content: post.comment }, response.data.id);
       }
@@ -99,5 +104,4 @@ export class TwitterService {
       console.error('Error posting tweet:', err);
     }
   }
-
 }

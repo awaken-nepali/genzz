@@ -7,6 +7,7 @@ import { FirebaseModule } from './firebase/firebase.module';
 import { TwitterModule } from './twitter/twitter.module';
 import { FacebookModule } from './facebook/facebook.module';
 import { SyncModule } from './sync/sync.module';
+import { UtilsModule } from './utils/utils.module';
 import { ScheduleService } from './schedule/schedule.service';
 import { FirebaseService } from './firebase/firebase.service';
 import { TwitterService } from './twitter/twitter.service';
@@ -22,6 +23,7 @@ import { FacebookService } from './facebook/facebook.service';
     TwitterModule,
     FacebookModule,
     SyncModule,
+    UtilsModule,
   ],
   controllers: [AppController],
   providers: [AppService, ScheduleService, FirebaseService, TwitterService, FacebookService],
