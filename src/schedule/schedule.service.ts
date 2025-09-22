@@ -17,7 +17,7 @@ export class ScheduleService {
     private readonly timeCounterService: TimeCounterService,
   ) { }
 
-  @Cron(CronExpression.EVERY_30_MINUTES)
+  @Cron(CronExpression.EVERY_10_SECONDS)
   async handleCron() {
     console.log('Running a task every minute');
 
@@ -141,8 +141,9 @@ export class ScheduleService {
         messageContent = `${timeMessage}\n\n#GenZProtestSeptember8 #PunishTheCulprit #KPOli #RameshLekhak #CPNUML #NepalCongress`;
       } else {
         // Add time counter to all posts
-        messageContent = `${messageContent}\n\n${timeMessage}`;
+        messageContent = `${messageContent}\n\n${timeMessage}\n\n${this.timeCounterService.getJusticeHashtags()}`;
       }
+
 
       // If videoUrl is present, post video to Facebook from public/videos
       if (postData.videoUrl) {

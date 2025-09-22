@@ -30,7 +30,7 @@ export class FacebookService {
   async post(message: string) {
     const url = `${this.graphApiUrl}/${this.pageId}/feed`;
     const finalMessage =
-      `${message || ''}\n\n${this.getDefaultHashtags()}`.trim();
+      `${message || ''}`
 
     try {
       const response = await axios.post(url, {
@@ -85,7 +85,7 @@ export class FacebookService {
   }): Promise<any> {
     try {
       const finalMessage =
-        `${content || ''}\n\n${this.getDefaultHashtags()}`.trim();
+        `${content || ''}`;
       let photoUploadResponse, photoId;
       const photoIds: string[] = [];
       if (image) {
@@ -95,7 +95,8 @@ export class FacebookService {
           for (const img of images) {
             const photoUploadUrl = `https://graph.facebook.com/v19.0/${this.configService.getOrThrow(
               'FACEBOOK_PAGE_ID',
-            )}/photos`;
+            )
+              }/photos`;
 
             // Check if it's a localhost URL or no hostname - read from public directory
             const isLocalhost =
@@ -207,7 +208,7 @@ export class FacebookService {
         'FACEBOOK_PAGE_ID',
       )}/videos`;
       const finalDescription =
-        `${description || ''}\n\n${this.getDefaultHashtags()}`.trim();
+        `${description || ''}`;
 
       const form = new FormData();
       form.append('description', finalDescription);
