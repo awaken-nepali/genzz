@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import configuration from './config/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -17,6 +18,7 @@ import { FacebookService } from './facebook/facebook.service';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      load: [configuration],
     }),
     ScheduleModule.forRoot(),
     FirebaseModule,
@@ -26,6 +28,12 @@ import { FacebookService } from './facebook/facebook.service';
     UtilsModule,
   ],
   controllers: [AppController],
-  providers: [AppService, ScheduleService, FirebaseService, TwitterService, FacebookService],
+  providers: [
+    AppService,
+    ScheduleService,
+    FirebaseService,
+    TwitterService,
+    FacebookService,
+  ],
 })
 export class AppModule { }

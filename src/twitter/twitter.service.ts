@@ -100,8 +100,24 @@ export class TwitterService {
         await this.postToTwitter({ content: post.comment }, response.data.id);
       }
       console.log('Tweet posted:', response);
+      return response.data; // Return the tweet data including ID
     } catch (err) {
       console.error('Error posting tweet:', err);
+      throw err;
+    }
+  }
+
+  async reshareTweet(tweetId: string): Promise<any> {
+    try {
+      const response = await this.twitterClient.v2.tweet({
+        text: 'Retweet',
+        quote_tweet_id: tweetId,
+      });
+      console.log('Tweet reshared:', response);
+      return response.data;
+    } catch (err) {
+      console.error('Error resharing tweet:', err);
+      throw err;
     }
   }
 }

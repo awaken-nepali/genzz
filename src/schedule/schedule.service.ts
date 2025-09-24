@@ -4,6 +4,7 @@ import { TwitterService } from '../twitter/twitter.service';
 import { FacebookService } from '../facebook/facebook.service';
 import { TimeCounterService } from '../utils/time-counter.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
@@ -15,9 +16,10 @@ export class ScheduleService {
     private readonly twitterService: TwitterService,
     private readonly facebookService: FacebookService,
     private readonly timeCounterService: TimeCounterService,
+    private readonly configService: ConfigService,
   ) { }
 
-  @Cron(CronExpression.EVERY_10_SECONDS)
+  @Cron(CronExpression.EVERY_MINUTE)
   async handleCron() {
     console.log('Running a task every minute');
 
@@ -94,7 +96,7 @@ export class ScheduleService {
               leadImage =
                 contentDoc.querySelector('img')?.getAttribute('src') ||
                 undefined;
-            } catch (_) {
+            } catch {
               // ignore content parsing errors
             }
           }
@@ -144,20 +146,20 @@ export class ScheduleService {
         messageContent = `${messageContent}\n\n${timeMessage}\n\n${this.timeCounterService.getJusticeHashtags()}`;
       }
 
-
       // If videoUrl is present, post video to Facebook from public/videos
       if (postData.videoUrl) {
+        let facebookResult = null;
         try {
           const baseUrl =
-            process.env.PUBLIC_BASE_URL ||
-            `http://localhost:${process.env.PORT ?? 3000}`;
+            this.configService.get<string>('PUBLIC_BASE_URL') ||
+            `http://localhost:${this.configService.get<number>('PORT') ?? 3000}`;
           const normalized = `${postData.videoUrl}`.replace(/^\/+/, '');
           const pathWithPrefix = normalized.startsWith('videos/')
             ? normalized
             : `videos/${normalized}`;
           const fileUrl = `${baseUrl}/${pathWithPrefix}`;
 
-          await this.facebookService.postToFacebookVideo({
+          facebookResult = await this.facebookService.postToFacebookVideo({
             videoUrl: fileUrl,
             description: messageContent,
           });
@@ -166,12 +168,18 @@ export class ScheduleService {
           console.error('Failed to post video on Facebook', e);
         }
 
-        // After video post, mark as posted and end this cycle
+        // After video post, mark as posted and store Facebook post ID
         try {
-          await selectedDoc.ref.update({
+          const updateData: any = {
             isPosted: true,
             postedAt: new Date(),
-          });
+          };
+
+          if (facebookResult?.id) {
+            updateData.facebookId = facebookResult.id;
+          }
+
+          await selectedDoc.ref.update(updateData);
           console.log(`Marked document ${selectedDoc.id} as posted (video)`);
         } catch (e) {
           console.error('Failed to update post document as posted', e);
@@ -179,35 +187,85 @@ export class ScheduleService {
         return;
       }
       const imageCsv = imagesArray.join(',');
-      // Post to Twitter (supports images)
-      try {
-        // await this.twitterService.postToTwitter({
-        //   content: messageContent,
-        //   image: imageCsv,
-        //   url: postData.url,
-        // });
-        console.log('Successfully posted to Twitter');
-      } catch (e) {
-        console.error('Failed to post on Twitter', e);
-      }
-      // Post to Facebook (supports images)
-      try {
-        if (imagesArray.length) {
-          await this.facebookService.postToFacebookWithImage({
-            image: imageCsv,
-            content: messageContent,
-          });
-        } else {
-          await this.facebookService.post(messageContent);
+
+      // Check if this post has been posted before (has social media IDs)
+      const hasSocialIds = postData.twitterId || postData.facebookId;
+      const reshareEnabled = this.configService.get<boolean>('RESHARE_ENABLED');
+
+      let twitterResult = null;
+      let facebookResult = null;
+
+      if (reshareEnabled && hasSocialIds) {
+        // Reshare existing posts
+        try {
+          if (postData.twitterId) {
+            twitterResult = await this.twitterService.reshareTweet(
+              postData.twitterId,
+            );
+            console.log('Successfully reshared on Twitter');
+          }
+        } catch (e) {
+          console.error('Failed to reshare on Twitter', e);
         }
-        console.log('Successfully posted to Facebook');
-      } catch (e) {
-        console.error('Failed to post on Facebook', e);
+
+        try {
+          if (postData.facebookId) {
+            facebookResult = await this.facebookService.reshareFacebookPost(
+              postData.facebookId,
+            );
+            console.log('Successfully reshared on Facebook');
+          }
+        } catch (e) {
+          console.error('Failed to reshare on Facebook', e);
+        }
+      } else {
+        // Create new posts
+        try {
+          twitterResult = await this.twitterService.postToTwitter({
+            content: messageContent,
+            image: imageCsv,
+            url: postData.url,
+          });
+          console.log('Successfully posted to Twitter');
+        } catch (e) {
+          console.error('Failed to post on Twitter', e);
+        }
+
+        try {
+          if (imagesArray.length) {
+            facebookResult = await this.facebookService.postToFacebookWithImage(
+              {
+                image: imageCsv,
+                content: messageContent,
+              },
+            );
+          } else {
+            facebookResult = await this.facebookService.post(messageContent);
+          }
+          console.log('Successfully posted to Facebook');
+        } catch (e) {
+          console.error('Failed to post on Facebook', e);
+        }
       }
 
-      // Update post document to mark as posted
+      // Update post document to mark as posted and store social media IDs
       try {
-        await selectedDoc.ref.update({ isPosted: true, postedAt: new Date() });
+        const updateData: any = {
+          isPosted: true,
+          postedAt: new Date(),
+        };
+
+        // Store social media post IDs if this was a new post
+        if (!hasSocialIds) {
+          if (twitterResult?.id) {
+            updateData.twitterId = twitterResult.id;
+          }
+          if (facebookResult?.id) {
+            updateData.facebookId = facebookResult.id;
+          }
+        }
+
+        await selectedDoc.ref.update(updateData);
         console.log(`Marked document ${selectedDoc.id} as posted`);
       } catch (e) {
         console.error('Failed to update post document as posted', e);

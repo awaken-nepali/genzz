@@ -10,7 +10,8 @@ import * as FormData from 'form-data';
 export class FacebookService {
   private readonly pageId: string;
   private readonly accessToken: string;
-  private readonly graphApiUrl = 'https://graph.facebook.com/v18.0';
+  private readonly graphApiUrl = `https://graph.facebook.com/${this.configService.get<string>('FACEBOOK_GRAPH_API_VERSION') || 'v23.0'
+    }`;
   private readonly logger = new Logger(FacebookService.name);
   private getDefaultHashtags(): string {
     const timeMessage = this.timeCounterService.getDramaticJusticeMessage();
@@ -29,8 +30,7 @@ export class FacebookService {
 
   async post(message: string) {
     const url = `${this.graphApiUrl}/${this.pageId}/feed`;
-    const finalMessage =
-      `${message || ''}`
+    const finalMessage = `${message || ''}`;
 
     try {
       const response = await axios.post(url, {
@@ -84,8 +84,7 @@ export class FacebookService {
     content: string;
   }): Promise<any> {
     try {
-      const finalMessage =
-        `${content || ''}`;
+      const finalMessage = `${content || ''}`;
       let photoUploadResponse, photoId;
       const photoIds: string[] = [];
       if (image) {
@@ -95,8 +94,7 @@ export class FacebookService {
           for (const img of images) {
             const photoUploadUrl = `https://graph.facebook.com/v19.0/${this.configService.getOrThrow(
               'FACEBOOK_PAGE_ID',
-            )
-              }/photos`;
+            )}/photos`;
 
             // Check if it's a localhost URL or no hostname - read from public directory
             const isLocalhost =
@@ -207,8 +205,7 @@ export class FacebookService {
       const url = `https://graph.facebook.com/v19.0/${this.configService.getOrThrow(
         'FACEBOOK_PAGE_ID',
       )}/videos`;
-      const finalDescription =
-        `${description || ''}`;
+      const finalDescription = `${description || ''}`;
 
       const form = new FormData();
       form.append('description', finalDescription);
@@ -266,6 +263,32 @@ export class FacebookService {
     } catch (error) {
       this.logger.error(
         'Failed to post video to Facebook',
+        error?.response?.data || error.message,
+      );
+      throw error;
+    }
+  }
+
+  async reshareFacebookPost(postId: string): Promise<any> {
+    try {
+      const url = `https://graph.facebook.com/v19.0/${this.configService.getOrThrow(
+        'FACEBOOK_PAGE_ID',
+      )}/feed`;
+
+      const { data } = await axios.post(url, null, {
+        params: {
+          link: `https://www.facebook.com/${postId}`,
+          access_token: this.configService.getOrThrow(
+            'FACEBOOK_USER_ACCESS_TOKEN',
+          ),
+        },
+      });
+
+      this.logger.log(`Reshared Facebook post: ${JSON.stringify(data)}`);
+      return data;
+    } catch (error) {
+      this.logger.error(
+        'Failed to reshare Facebook post',
         error?.response?.data || error.message,
       );
       throw error;

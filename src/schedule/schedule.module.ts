@@ -4,4 +4,4 @@ import { ScheduleService } from './schedule.service';
 @Module({
   providers: [ScheduleService]
 })
-export class ScheduleModule {}
+export class ScheduleModule { }
