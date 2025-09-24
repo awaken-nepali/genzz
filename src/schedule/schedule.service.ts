@@ -19,7 +19,7 @@ export class ScheduleService {
     private readonly configService: ConfigService,
   ) { }
 
-  @Cron(CronExpression.EVERY_MINUTE)
+  @Cron(CronExpression.EVERY_HOUR)
   async handleCron() {
     console.log('Running a task every minute');
 
