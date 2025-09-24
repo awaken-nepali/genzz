@@ -1,0 +1,31 @@
+node_modules
+npm-debug.log
+Dockerfile
+.dockerignore
+.git
+.gitignore
+.env
+.env.*
+coverage
+.tmp
+.cache
+dist
+*.local
+*.log
+**/*.swp
+**/*.swo
+**/*.DS_Store
+
+# IDE
+.vscode
+.idea
+
+# Tests and scripts not needed in prod image
+/test
+**/*.spec.*
+**/*.e2e-spec.*
+**/*.snap
+scripts
+
+# macOS
+.DS_Store
