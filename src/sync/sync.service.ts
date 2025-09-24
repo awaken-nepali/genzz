@@ -17,7 +17,6 @@ export class SyncService {
     private readonly firebase: FirebaseService,
   ) { }
 
-  @Cron('0 3 * * *')
   async nightlySync() {
     this.logger.log('Starting nightly sync from sources');
     const firestore = this.firebase.getFirestore();

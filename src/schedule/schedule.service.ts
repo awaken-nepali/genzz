@@ -19,7 +19,7 @@ export class ScheduleService {
     private readonly configService: ConfigService,
   ) { }
 
-  @Cron(CronExpression.EVERY_MINUTE)
+  @Cron(CronExpression.EVERY_HOUR)
   async handleCron() {
     console.log('Running a task every minute');
 
@@ -284,7 +284,6 @@ export class ScheduleService {
     }
   }
 
-  @Cron('0 0 * * *')
   async resetIsPostedAtMidnight() {
     console.log('Resetting isPosted to false for all posts at midnight');
     const firestore = this.firebaseService.getFirestore();
