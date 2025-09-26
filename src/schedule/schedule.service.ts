@@ -19,9 +19,9 @@ export class ScheduleService {
     private readonly configService: ConfigService,
   ) { }
 
-  @Cron(CronExpression.EVERY_HOUR)
-  async handleCron() {
-    console.log('Running a task every minute');
+  @Cron(CronExpression.EVERY_30_MINUTES)
+  async handlePhotoCron() {
+    console.log('Running photo/text post task every 30 minutes');
 
     // 1. Fetch data from Firebase
     const firestore = this.firebaseService.getFirestore();
@@ -35,10 +35,13 @@ export class ScheduleService {
         return;
       }
 
-      // Build candidate list of unposted items and pick one at random
+      // Build candidate list of unposted items WITHOUT videoUrl and pick one at random
       const candidates = postsSnapshot.docs.filter((doc) => {
         const data: any = doc.data();
-        return data?.isPosted === undefined || data?.isPosted !== true;
+        const isUnposted =
+          data?.isPosted === undefined || data?.isPosted !== true;
+        const hasNoVideo = !data?.videoUrl;
+        return isUnposted && hasNoVideo;
       });
 
       if (!candidates.length) {
@@ -146,46 +149,7 @@ export class ScheduleService {
         messageContent = `${messageContent}\n\n${timeMessage}\n\n${this.timeCounterService.getJusticeHashtags()}`;
       }
 
-      // If videoUrl is present, post video to Facebook from public/videos
-      if (postData.videoUrl) {
-        let facebookResult = null;
-        try {
-          const baseUrl =
-            this.configService.get<string>('PUBLIC_BASE_URL') ||
-            `http://localhost:${this.configService.get<number>('PORT') ?? 3000}`;
-          const normalized = `${postData.videoUrl}`.replace(/^\/+/, '');
-          const pathWithPrefix = normalized.startsWith('videos/')
-            ? normalized
-            : `videos/${normalized}`;
-          const fileUrl = `${baseUrl}/${pathWithPrefix}`;
-
-          facebookResult = await this.facebookService.postToFacebookVideo({
-            videoUrl: fileUrl,
-            description: messageContent,
-          });
-          console.log('Successfully posted video to Facebook');
-        } catch (e) {
-          console.error('Failed to post video on Facebook', e);
-        }
-
-        // After video post, mark as posted and store Facebook post ID
-        try {
-          const updateData: any = {
-            isPosted: true,
-            postedAt: new Date(),
-          };
-
-          if (facebookResult?.id) {
-            updateData.facebookId = facebookResult.id;
-          }
-
-          await selectedDoc.ref.update(updateData);
-          console.log(`Marked document ${selectedDoc.id} as posted (video)`);
-        } catch (e) {
-          console.error('Failed to update post document as posted', e);
-        }
-        return;
-      }
+      // Photo job does not handle videos
       const imageCsv = imagesArray.join(',');
 
       // Check if this post has been posted before (has social media IDs)
@@ -284,6 +248,166 @@ export class ScheduleService {
     }
   }
 
+  @Cron(CronExpression.EVERY_HOUR)
+  async handleVideoCron() {
+    console.log('Running video post task every hour');
+
+    const firestore = this.firebaseService.getFirestore();
+
+    try {
+      const postsSnapshot = await firestore.collection('posts').limit(50).get();
+
+      if (postsSnapshot.empty) {
+        console.log('No posts found in Firebase collection');
+        return;
+      }
+
+      const candidates = postsSnapshot.docs.filter((doc) => {
+        const data: any = doc.data();
+        const isUnposted =
+          data?.isPosted === undefined || data?.isPosted !== true;
+        const hasVideo = Boolean(data?.videoUrl);
+        return isUnposted && hasVideo;
+      });
+
+      if (!candidates.length) {
+        console.log(
+          'All candidate video posts already marked as posted; resetting isPosted to restart cycle',
+        );
+        try {
+          await this.resetIsPostedAtMidnight();
+        } catch (e) {
+          console.error('Failed to reset isPosted when pool exhausted', e);
+        }
+        return;
+      }
+
+      const selectedDoc =
+        candidates[Math.floor(Math.random() * candidates.length)];
+      const postData: any = selectedDoc.data();
+      console.log('Selected Firebase Document ID:', selectedDoc.id);
+      console.log(
+        'Selected Firebase Document Data:',
+        JSON.stringify(postData, null, 2),
+      );
+
+      if (postData.url) {
+        try {
+          const { data: html } = await axios.get(postData.url, {
+            timeout: 8000,
+          });
+          const dom = new JSDOM(html, { url: postData.url });
+          const reader = new Readability(dom.window.document);
+          const article = reader.parse();
+          const updatedFields: any = {};
+          if (article?.title && !postData.title)
+            updatedFields.title = article.title;
+          if (article?.excerpt && !postData.content)
+            updatedFields.content = article.excerpt;
+
+          const doc = dom.window.document as Document;
+          const ogImage =
+            doc
+              .querySelector('meta[property="og:image"]')
+              ?.getAttribute('content') ||
+            doc
+              .querySelector('meta[name="twitter:image"]')
+              ?.getAttribute('content') ||
+            doc.querySelector('link[rel="image_src"]')?.getAttribute('href') ||
+            undefined;
+
+          let leadImage: string | undefined = ogImage || undefined;
+          if (!leadImage && article?.content) {
+            try {
+              const contentDoc = new JSDOM(article.content).window.document;
+              leadImage =
+                contentDoc.querySelector('img')?.getAttribute('src') ||
+                undefined;
+            } catch {
+              // ignore content parsing errors
+            }
+          }
+
+          if (leadImage) {
+            const currentImages: string[] = Array.isArray(postData.images)
+              ? postData.images.filter(Boolean)
+              : [];
+            if (!currentImages.includes(leadImage)) {
+              updatedFields.images = [...currentImages, leadImage];
+            }
+          }
+          if (Object.keys(updatedFields).length) {
+            await selectedDoc.ref.update(updatedFields);
+            postData.title = updatedFields.title ?? postData.title;
+            postData.content = updatedFields.content ?? postData.content;
+            if (updatedFields.images) postData.images = updatedFields.images;
+            console.log('Updated document with URL metadata:', updatedFields);
+          }
+        } catch (e) {
+          console.error(
+            'Failed to fetch URL metadata',
+            (e && (e.response?.status || e.message)) || e,
+          );
+        }
+      }
+
+      const imagesArray: string[] = Array.isArray(postData.images)
+        ? postData.images.filter(Boolean)
+        : [];
+      const timeMessage = this.timeCounterService.getDramaticJusticeMessage();
+
+      let messageContent =
+        `${postData.title || ''}\n\n${postData.content || ''} \n\n ${postData.url || ''}`.trim();
+      if (
+        !postData.title &&
+        !postData.content &&
+        !postData.url &&
+        imagesArray.length
+      ) {
+        messageContent = `${timeMessage}\n\n#GenZProtestSeptember8 #PunishTheCulprit #KPOli #RameshLekhak #CPNUML #NepalCongress`;
+      } else {
+        messageContent = `${messageContent}\n\n${timeMessage}\n\n${this.timeCounterService.getJusticeHashtags()}`;
+      }
+
+      let facebookResult = null;
+      try {
+        const baseUrl =
+          this.configService.get<string>('PUBLIC_BASE_URL') ||
+          `http://localhost:${this.configService.get<number>('PORT') ?? 3000}`;
+        const normalized = `${postData.videoUrl}`.replace(/^\/+/, '');
+        const pathWithPrefix = normalized.startsWith('videos/')
+          ? normalized
+          : `videos/${normalized}`;
+        const fileUrl = `${baseUrl}/${pathWithPrefix}`;
+
+        facebookResult = await this.facebookService.postToFacebookVideo({
+          videoUrl: fileUrl,
+          description: messageContent,
+        });
+        console.log('Successfully posted video to Facebook');
+      } catch (e) {
+        console.error('Failed to post video on Facebook', e);
+      }
+
+      try {
+        const updateData: any = {
+          isPosted: true,
+          postedAt: new Date(),
+        };
+        if (facebookResult?.id) {
+          updateData.facebookId = facebookResult.id;
+        }
+
+        await selectedDoc.ref.update(updateData);
+        console.log(`Marked document ${selectedDoc.id} as posted (video)`);
+      } catch (e) {
+        console.error('Failed to update post document as posted', e);
+      }
+    } catch (error) {
+      console.error('Error fetching data from Firebase:', error);
+    }
+  }
+
   async resetIsPostedAtMidnight() {
     console.log('Resetting isPosted to false for all posts at midnight');
     const firestore = this.firebaseService.getFirestore();
@@ -321,7 +445,7 @@ export class ScheduleService {
   // Manual trigger for testing
   async manualTrigger() {
     console.log('Manual trigger called');
-    return await this.handleCron();
+    return await this.handlePhotoCron();
   }
 
   // Manual HTML parsing helpers removed in favor of Readability
